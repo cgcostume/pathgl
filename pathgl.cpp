@@ -16,17 +16,22 @@
 #include <algorithm>
 #include <iterator>
 
+// GL_ARRAY_BUFFER for rect vertices
 GLuint rect(-1);
 
+// handles for shaders and program
 GLuint tracevert(-1);
 GLuint tracefrag(-1);
 GLuint traceprog(-1);
 
+// fbo with texture for floating color attachment
 GLuint framebuffer(-1);
 GLuint texture(-1);
 
+// frame counter for iterative accumulation
 int frame(-1);
 
+// camera - taken for cornell box
 glm::vec3 eye   (278.f, 273.f,-800.f);
 glm::vec3 center(eye + glm::vec3(0.f, 0.f, 1.f));
 glm::vec3 up(0.f, 1.f, 0.f);
@@ -35,20 +40,24 @@ float fovy(140.0);
 
 GLint viewport[2] = { 520, 520 };
 
+// transform storing model view projection for 
+// ray retrieval in vertex shader
 glm::mat4 transform;
 
+// texture handler - TODO: try using images instead
 GLuint verticesImage(-1);
 GLuint indicesImage(-1);
 GLuint colorsImage(-1);
 GLuint hsphereImage(-1);
 
+// uniform handler
 GLuint u_frame(-1);
 GLuint u_accum(-1);
 GLuint u_eye(-1);
 GLuint u_transform(-1);
 GLuint u_viewport(-1);
 
-
+// opengl error handling with debug info
 const bool error(
     const char * file
 ,   const int line)
@@ -65,7 +74,7 @@ const bool error(
 #define glError() error(__FILE__, __LINE__)
 
 
-void shader_error(const GLuint shader)
+void glShaderError(const GLuint shader)
 {
     GLint status(GL_FALSE);
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
@@ -82,10 +91,14 @@ void shader_error(const GLuint shader)
     glGetShaderInfoLog(shader, maxLength, &logLength, log);
 
     if(logLength)
-        std::cerr << log;
+        std::cerr << "GLSL: " << log << std::endl;
 }
 
-void update_source(const GLuint shader, const char * filepath)
+// dumps text file into shader
+
+void updateSource(
+	const GLuint shader
+,	const char * filepath)
 {
 	std::ifstream stream(filepath, std::ios::in);
 	if(!stream)
@@ -102,9 +115,13 @@ void update_source(const GLuint shader, const char * filepath)
     const GLchar * chr(str.c_str());
 
     glShaderSource(shader, 1, &chr, nullptr);
-    glCompileShader(shader); shader_error(shader);
+    glCompileShader(shader); 
+
+	glError();
+	glShaderError(shader);
 }
 
+// clears the accumulation texture and resets frame number
 void clear()
 {
     frame = -1;
@@ -114,16 +131,19 @@ void clear()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+// updates shader sources, and reinitializes uniforms
 void update()
 {
     glError();
 
-    update_source(tracevert, "trace.vert");
-    update_source(tracefrag, "trace.frag");
+    updateSource(tracevert, "trace.vert");
+    updateSource(tracefrag, "trace.frag");
 
     glLinkProgram(traceprog);
     glUseProgram(traceprog);
     glError();
+
+	// assign uniforms
 
     u_transform = glGetUniformLocation(traceprog, "transform");
     u_frame     = glGetUniformLocation(traceprog, "frame");
@@ -139,6 +159,9 @@ void update()
         glUniform3fv(u_eye, 1, glm::value_ptr(eye));
     if(u_viewport != -1)
         glUniform4f(u_viewport, viewportf.x, viewportf.y, 1.f / viewportf.x, 1.f / viewportf.y);
+
+
+	// assign images/sampler
 
 	GLuint u_vertices = glGetUniformLocation(traceprog, "vertices");
 	GLuint u_indices  = glGetUniformLocation(traceprog, "indices");
@@ -162,6 +185,7 @@ void update()
     clear();
 }
 
+// resizes viewport and accumulation texture, configures the camera/view
 void on_reshape(int w, int h)
 {
     glError();
@@ -199,6 +223,10 @@ void on_reshape(int w, int h)
     clear();
 }
 
+// increments frame number, calcs accum factor, executes path tracing for viewport
+// by rendering the screen aligned rect into fbo with accumulation texture, while 
+// accessing it simultaneously ;D - NOTE: do not access after fragment is writen.
+// finally blits the accumulation texture to backbuffer (single buffering) and flushes.
 void on_display()
 {
     glUniform1i(u_frame, ++frame);
@@ -214,6 +242,7 @@ void on_display()
     glFlush();
 }
 
+// moep
 void on_keyboard(unsigned char key,	int x, int y)
 {
     switch(key)
@@ -228,6 +257,7 @@ void on_keyboard(unsigned char key,	int x, int y)
     glutPostRedisplay();
 }
 
+// updates on f5 (includes clear), clears on f6
 void on_special(int key, int x,	int y)
 {
     switch(key)
@@ -235,19 +265,24 @@ void on_special(int key, int x,	int y)
 	case GLUT_KEY_F5:
         update();
 		break;
-
+	case GLUT_KEY_F6:
+        clear();
+		break;
 	default:
 		break;
     }
     glutPostRedisplay();
 }
 
+// posts redisplay each millisecond
 void on_timer(int value)
 {
     glutTimerFunc(0, on_timer, 0);
     glutPostRedisplay();
 }
 
+// splits a triangle edge by adding an appropriate new point (normalized on sphere)
+// to the points list (if not already cached) and returns the index to this point.
 const glm::uint splitEdge(
     const glm::uint a
 ,   const glm::uint b
@@ -276,16 +311,16 @@ const glm::uint splitEdge(
     return i;
 }
 
+// creates at least minN points on a unitsphere by creating a hemi-icosphere:
+// approach to create evenly distributed points on a sphere
+//   1. create points of icosphere
+//   2. cutout hemisphere
+//   3. randomize point list
 
 void pointsOnSphere(
     std::vector<glm::vec3> & points
 ,   const unsigned int minN)
 {
-    // approach to create evenly distributed points on a sphere
-    // 1. create points of icosphere
-    // 2. cutout hemisphere
-    // 3. randomize point list
-
     // 1. create an icosphere
 
     static const float t = (1.f + sqrtf(5.f)) * 0.5f;
@@ -384,7 +419,7 @@ void pointsOnSphere(
     std::shuffle(points.begin(), points.end(), engine);
 }
 
-
+// initialization
 int main(int argc, char** argv)
 {
     // GLUT & GLEW
@@ -608,8 +643,8 @@ int main(int argc, char** argv)
     glActiveTexture(GL_TEXTURE0);
 
     // START
-
-    glutMainLoop();
+	
+	glutMainLoop();
 
     return 0;
 }
