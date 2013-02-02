@@ -1,4 +1,6 @@
-#version 430
+#version 140
+
+out vec4 gl_FragColor;
 
 uniform int frame;
 uniform float accum;
@@ -17,23 +19,23 @@ uniform  sampler2D source;
 in vec2 v_uv;
 in vec3 v_ray;
 
+const vec3 up = vec3(0.0, 1.0, 0.0);
+
 const float EPSILON  = 1e-6;
 const float INFINITY = 1e+4;
 
 // intersection with triangle
 bool intersection(
-	const in vec3  tri0
-,	const in vec3  tri1
-,	const in vec3  tri2
-,	const in vec3  rayo
-,	const in vec3  rayd
+	const in vec3  triangle[3]
+,	const in vec3  origin
+,	const in vec3  ray
 ,	const in float tm
 ,   out float t)
 {
-	vec3 e0 = tri1 - tri0;
-	vec3 e1 = tri2 - tri0;
+	vec3 e0 = triangle[1] - triangle[0];
+	vec3 e1 = triangle[2] - triangle[0];
 
-	vec3  h = cross(rayd, e1);
+	vec3  h = cross(ray, e1);
 	float a = dot(e0, h);
 
 	if(a > -EPSILON && a < EPSILON)
@@ -41,14 +43,14 @@ bool intersection(
 
 	float f = 1.0 / a;
 
-	vec3  s = rayo - tri0;
+	vec3  s = origin - triangle[0];
 	float u = f * dot(s, h);
 
 	if(u < 0.0 || u > 1.0)
 		return false;
 
 	vec3  q = cross(s, e0);
-	float v = f * dot(rayd, q);
+	float v = f * dot(ray, q);
 
 	if(v < 0.0 || u + v > 1.0)
 		return false;
@@ -64,27 +66,27 @@ bool intersection(
 // plane intersection
 bool intersectionPlane(
     const in vec4  plane
-,   const in vec3  rayo
-,   const in vec3  rayd
+,   const in vec3  origin
+,   const in vec3  ray
 ,   const in float tm
 ,   out float t)
 {
-    t = -(dot(plane.xyz, rayo) + plane.w) / dot(plane.xyz, rayd);
+    t = -(dot(plane.xyz, origin) + plane.w) / dot(plane.xyz, ray);
     return (t > 0.0) && (t < tm);
 }
 
 // sphere intersection
 bool intersectionSphere(
     const in vec4  sphere
-,   const in vec3  rayo
-,   const in vec3  rayd
+,   const in vec3  origin
+,   const in vec3  ray
 ,   const in float tm
 ,   out float t)
 {
     bool  r = false;
-    vec3  d = rayo - sphere.xyz;  // distance
+    vec3  d = origin - sphere.xyz;  // distance
 
-    float b = dot(rayd, d);
+    float b = dot(ray, d);
     float c = dot(d, d) - sphere.w * sphere.w;
 
     t = b * b - c;
@@ -99,15 +101,13 @@ bool intersectionSphere(
 
 // intersection with scene geometry
 float intersection(
-    const in vec3 rayo
-,   const in vec3 rayd
+    const in vec3 origin
+,   const in vec3 ray
 ,   out vec3 triangle[3]
-,   out vec4 color)
+,   out int index)
 {
     float tm = INFINITY;
-    float t;
-
-	color = vec4(0.0, 0.0, 0.0, 1.0);
+    float t = INFINITY;
 
 	 vec3 tv[3];
 	 vec4 tc;
@@ -121,10 +121,10 @@ float intersection(
 		tv[1] = texelFetch(vertices, ti[1], 0).xyz;
 		tv[2] = texelFetch(vertices, ti[2], 0).xyz;
 
-		if(intersection( tv[0], tv[1], tv[2], rayo, rayd, tm, t))
+		if(intersection( tv, origin, ray, tm, t))
 		{
 			triangle = tv;
-			color = texelFetch(colors, ti[3], 0);
+			index = ti[3];
 			tm = t;
 		}
 	}
@@ -133,8 +133,8 @@ float intersection(
 
 // intersection with scene geometry
 bool shadow(
-    const in vec3 rayo
-,   const in vec3 rayd)
+    const in vec3 origin
+,   const in vec3 ray)
 {
     float tm = INFINITY;
 	float t;
@@ -153,7 +153,7 @@ bool shadow(
 		tv[1] = texelFetch(vertices, ti[1], 0).xyz;
 		tv[2] = texelFetch(vertices, ti[2], 0).xyz;
 
-		if(intersection( tv[0], tv[1], tv[2], rayo, rayd, tm, t))
+		if(intersection( tv, origin, ray, tm, t))
 		{
 			tm = t;
 			continue;
@@ -170,30 +170,50 @@ bool shadow(
 		tv[1] = texelFetch(vertices, ti[1], 0).xyz;
 		tv[2] = texelFetch(vertices, ti[2], 0).xyz;
 
-		if(intersection( tv[0], tv[1], tv[2], rayo, rayd, tm, t))
+		if(intersection( tv, origin, ray, tm, t))
 			return false;
 	}
 	return true;
 }
 
 vec3 normal(
-	const in vec3 tri[3])
+	const in vec3 triangle[3]
+,	out mat3 tangentspace)
 {
-	vec3 e0 = tri[1] - tri[0];
-	vec3 e1 = tri[2] - tri[0];
+	vec3 e0 = triangle[1] - triangle[0];
+	vec3 e1 = triangle[2] - triangle[0];
 
-	return normalize(cross(e0, e1));
+	// hemisphere samplepoints is oriented up
+
+	tangentspace[0] = normalize(e0);
+	tangentspace[1] = normalize(cross(e0, e1));
+	tangentspace[2] = cross(tangentspace[1], tangentspace[0]);
+
+	return tangentspace[1];
 }
 
+vec3 random(
+	const in int offset
+,	const in int fragID
+,	const in ivec2 hspheresize)
+{
+	int i = int(mod(fragID, hspheresize[0] * hspheresize[1]));
 
-vec4 shade(
+    int y = int(i / float(hspheresize[0]));
+    int x = int(i - y * hspheresize[0]);
+
+	// select random point on hemisphere
+	return texelFetch(hsphere, ivec2(x, y), 0).rgb;
+}
+
+/*vec4 shade(
 	const in vec3 po
-,	const in vec3 tri[3]
+,	const in vec3 triangle[3]
 ,	const in vec4 color
-,	const in vec3 rayd
+,	const in vec3 ray
 ,	out vec3 refl)
 {
-	vec3  n = normal(tri);
+	vec3  n = normal(triangle);
 
 	// 1. absorb some color from 
 	// 2. get random direction on oriented disk
@@ -204,7 +224,7 @@ vec4 shade(
 	//float s = shadow(po, refl) ? 0.5 : 1.0;
 
 	return vec4(n * 0.5 + 0.5, 1.0);
-}
+}*/
 
 // http://gpupathtracer.blogspot.de/
 // http://www.iquilezles.org/www/articles/simplepathtracing/simplepathtracing.htm
@@ -215,12 +235,45 @@ vec4 shade(
 
 void main()
 {
-    vec3 rayo = eye;
-    vec3 rayd = normalize(v_ray);
+    vec3 origin = eye;
+    vec3 ray = normalize(v_ray);
+	vec3 n, hit;
+	mat3 tangentspace;
 
+	// fragment index for random variation
+	ivec2 hspheresize = textureSize(hsphere, 0);
+	vec2 xy = v_uv * vec2(viewport[0], viewport[1]);
+	int fragID = int(xy.y * viewport[0] + xy.x + frame);
+
+	// triangle data
     vec3 triangle[3];
-    vec4 color;
-	vec3 refl;
+    vec3 color;
+    int index;
+
+	// path color accumulation
+	vec3 maskColor = vec3(1.0);
+	vec3 pathColor = vec3(0.0);
+
+	float t = INFINITY;
+
+	for(int bounce = 0; bounce < 5; ++bounce)
+	{
+  		t = intersection(origin, ray, triangle, index); // compute t from objects
+
+		hit = origin + ray * t;
+		n = normal(triangle, tangentspace);
+
+  		vec3 color = texelFetch(colors, index, 0).xyz; // compute material color from hit
+  		float lighting = 0.2; // compute direct lighting from hit
+
+  		// accumulate incoming light
+  		maskColor *= color;
+  		pathColor += maskColor * lighting;
+
+  		ray = tangentspace * random(bounce, fragID, hspheresize); // compute next ray
+  		origin = hit;
+	}
+
     /*
     float t;
 	vec3 po = rayo;
@@ -231,18 +284,7 @@ void main()
 	color = shade(po, triangle, color, rayd, refl);
     */
     //gl_FragColor = texture(source, v_uv) + 0.001 * color; //v_uv.x, v_uv.y, 0.0, 1.0);
-
     
-    vec2 xy = v_uv * vec2(viewport[0], viewport[1]);
-    ivec2 wh = textureSize(hsphere, 0);
-
-    int i = int(mod(xy.y * viewport[0] + xy.x + frame, wh[0] * wh[1]));
-
-    int y = int(i / float(wh[0]));
-    int x = int(i - y * wh[0]);
-
-    // make randome oriented hemisphere function!
-
-    gl_FragColor = mix(texelFetch(hsphere, ivec2(x, y), 0), texture(source, v_uv), accum);
+    gl_FragColor = vec4(mix(pathColor, texture(source, v_uv).rgb, accum), 1.0);
     //gl_FragColor = vec4(vec3(accum * 0.5), 1.0);
 }

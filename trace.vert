@@ -1,4 +1,4 @@
-#version 430
+#version 140
 
 uniform mat4 transform;
 

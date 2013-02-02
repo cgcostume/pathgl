@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -27,6 +28,9 @@ GLuint traceprog(-1);
 // fbo with texture for floating color attachment
 GLuint framebuffer(-1);
 GLuint texture(-1);
+
+// millisecs per frame
+int fps(20);
 
 // frame counter for iterative accumulation
 int frame(-1);
@@ -223,6 +227,10 @@ void on_reshape(int w, int h)
     clear();
 }
 
+float a = 0.f;
+
+glm::vec3 triangle[3];
+
 // increments frame number, calcs accum factor, executes path tracing for viewport
 // by rendering the screen aligned rect into fbo with accumulation texture, while 
 // accessing it simultaneously ;D - NOTE: do not access after fragment is writen.
@@ -240,6 +248,7 @@ void on_display()
     glBlitFramebuffer(0, 0, viewport[0], viewport[1], 0, 0, viewport[0], viewport[1], GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
     glFlush();
+	glutSwapBuffers();
 }
 
 // moep
@@ -251,10 +260,19 @@ void on_keyboard(unsigned char key,	int x, int y)
 		exit(0);
         break;
 
+	case 43: // + key
+		if(fps < 1000)
+			++fps;
+		break;
+
+	case 45: // - key
+		if(fps > 1)
+			--fps;
+		break;
+
     default:
 		break;
     }
-    glutPostRedisplay();
 }
 
 // updates on f5 (includes clear), clears on f6
@@ -271,14 +289,15 @@ void on_special(int key, int x,	int y)
 	default:
 		break;
     }
-    glutPostRedisplay();
 }
 
 // posts redisplay each millisecond
 void on_timer(int value)
 {
-    glutTimerFunc(0, on_timer, 0);
-    glutPostRedisplay();
+	const int ms(static_cast<int>(1000.0 / fps));
+
+    glutTimerFunc(ms, on_timer, ms);
+	glutPostRedisplay();
 }
 
 // splits a triangle edge by adding an appropriate new point (normalized on sphere)
@@ -430,7 +449,7 @@ int main(int argc, char** argv)
     //glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
     //glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
 
-    glutInitDisplayMode(GLUT_RGBA | GLUT_SINGLE);
+	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
     glutInitWindowSize(viewport[0], viewport[1]);
 
     glutCreateWindow("Minimal GLSL Path Tracer v1 - Daniel Limberger");
@@ -441,7 +460,7 @@ int main(int argc, char** argv)
     glutKeyboardFunc(on_keyboard);
     glutSpecialFunc (on_special);
 
-    glutTimerFunc(0, on_timer, 0);
+    glutTimerFunc(1, on_timer, 1);
 
     // RECT
 
@@ -546,6 +565,9 @@ int main(int argc, char** argv)
 	// room ceiling
 	indices.push_back(glm::uvec4( 10, 11,  7, 1));
 	indices.push_back(glm::uvec4( 10,  7,  6, 1));
+	//// room front wall
+	//indices.push_back(glm::uvec4(  4,  6, 10, 1));
+	//indices.push_back(glm::uvec4(  4, 10,  8, 1));
 	// room back wall
 	indices.push_back(glm::uvec4(  9,  5,  7, 1));
 	indices.push_back(glm::uvec4(  9,  7, 11, 1));
@@ -622,7 +644,7 @@ int main(int argc, char** argv)
     // CREATE HEMISPHERE SAMPLES
 
     std::vector<glm::vec3> points;
-    pointsOnSphere(points, static_cast<unsigned int>(1e5));
+    pointsOnSphere(points, static_cast<unsigned int>(1e4));
 
     const GLsizei samplerSize = static_cast<GLsizei>(sqrt(points.size()));
     while(points.size() > samplerSize * samplerSize)
