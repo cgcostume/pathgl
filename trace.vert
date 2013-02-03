@@ -2,6 +2,8 @@
 
 uniform mat4 transform;
 
+uniform int frame;
+
 in vec3 a_vertex;
 
 out vec2 v_uv;

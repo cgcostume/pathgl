@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtc/random.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -17,8 +17,8 @@
 #include <algorithm>
 #include <iterator>
 
-
-std::mt19937 rng;
+std::vector<glm::vec3> points;	// TODO: remvoe
+#include <time.h>
 
 // GL_ARRAY_BUFFER for rect vertices
 GLuint rect(-1);
@@ -43,7 +43,7 @@ glm::vec3 eye   (278.f, 273.f,-800.f);
 glm::vec3 center(eye + glm::vec3(0.f, 0.f, 1.f));
 glm::vec3 up(0.f, 1.f, 0.f);
 
-float fovy(140.0);
+float fovy(40.0);
 
 GLint viewport[2] = { 520, 520 };
 
@@ -56,7 +56,6 @@ GLuint verticesImage(-1);
 GLuint indicesImage(-1);
 GLuint colorsImage(-1);
 GLuint hsphereImage(-1);
-GLuint lightsImage(-1);
 
 // uniform handler
 GLuint u_frame(-1);
@@ -64,7 +63,6 @@ GLuint u_accum(-1);
 GLuint u_eye(-1);
 GLuint u_transform(-1);
 GLuint u_viewport(-1);
-GLuint u_rand(-1);
 
 // opengl error handling with debug info
 const bool error(
@@ -156,7 +154,6 @@ void update()
 
     u_transform = glGetUniformLocation(traceprog, "transform");
     u_frame     = glGetUniformLocation(traceprog, "frame");
-	u_rand      = glGetUniformLocation(traceprog, "rand");
     u_accum     = glGetUniformLocation(traceprog, "accum");
     u_eye       = glGetUniformLocation(traceprog, "eye");
     u_viewport  = glGetUniformLocation(traceprog, "viewport");
@@ -178,7 +175,6 @@ void update()
 	GLuint u_colors   = glGetUniformLocation(traceprog, "colors");
     GLuint u_source   = glGetUniformLocation(traceprog, "source");
     GLuint u_hsphere  = glGetUniformLocation(traceprog, "hsphere");
-	GLuint u_lights   = glGetUniformLocation(traceprog, "lights");
 
 	if(u_source != -1)
 		glUniform1i(u_source,   0);
@@ -190,9 +186,6 @@ void update()
 		glUniform1i(u_colors,   3);
     if(u_hsphere != -1)
         glUniform1i(u_hsphere,  4);
-	if(u_lights != -1)
-		glUniform1i(u_lights,   5);
-
 
     glError();
 
@@ -237,7 +230,9 @@ void on_reshape(int w, int h)
     clear();
 }
 
-std::uniform_int_distribution<int> int_dist(0, 1e6);
+float a = 0.f;
+
+glm::vec3 triangle[3];
 
 // increments frame number, calcs accum factor, executes path tracing for viewport
 // by rendering the screen aligned rect into fbo with accumulation texture, while 
@@ -245,18 +240,109 @@ std::uniform_int_distribution<int> int_dist(0, 1e6);
 // finally blits the accumulation texture to backbuffer (single buffering) and flushes.
 void on_display()
 {
-    glUniform1i(u_frame, ++frame);
-	glUniform1i(u_rand, int_dist(rng));
-    glUniform1f(u_accum, static_cast<float>(frame) / static_cast<float>(frame + 1));
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glUseProgram(0);
 
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glClear(GL_COLOR_BUFFER_BIT |GL_DEPTH_BUFFER_BIT);
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-    glBlitFramebuffer(0, 0, viewport[0], viewport[1], 0, 0, viewport[0], viewport[1], GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	gluPerspective(40.f, static_cast<float>(viewport[1]) / static_cast<float>(viewport[0]), 0.1, 6.f);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glViewport(0, 0, viewport[0], viewport[1]);
+	gluLookAt(0.f, 1.f, -4.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f);
+
+	a += 1.3f;
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+
+	glRotatef(a, 0.f, 1.f, 0.f);
+
+
+	if(int(a) % 100 == 0)
+	{
+		triangle[0] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+		triangle[1] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+		triangle[2] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+	}
+
+	glBegin(GL_LINES);
+	
+	glLineWidth(2.f);
+
+	glColor3f(0.f, 0.f, 1.f);
+	glVertex3fv(glm::value_ptr(triangle[0]));
+	glVertex3fv(glm::value_ptr(triangle[1]));
+	glVertex3fv(glm::value_ptr(triangle[1]));
+	glVertex3fv(glm::value_ptr(triangle[2]));
+	glVertex3fv(glm::value_ptr(triangle[2]));
+	glVertex3fv(glm::value_ptr(triangle[0]));
+
+
+	glm::vec3 t0 = (triangle[0] + triangle[1] + triangle[2]) / 3.f;
+	glm::vec3 e0 = glm::normalize(triangle[1] - triangle[0]);
+	glm::vec3 e1 = glm::normalize(triangle[2] - triangle[0]);
+
+	glm::vec3 n(glm::normalize(glm::cross(e0, e1)));
+	glm::vec3 t(e0);
+	glm::vec3 b(glm::cross(n, t));
+
+	
+
+	glColor3f(1.f, 1.f, 0.f);
+	glVertex3fv(glm::value_ptr(t0));
+	glVertex3fv(glm::value_ptr(t0 + b * 2.f));
+
+	glColor3f(1.f, 0.f, 0.f);
+	glVertex3fv(glm::value_ptr(t0));
+	glVertex3fv(glm::value_ptr(t0 + t * 2.f));
+
+	glColor3f(0.f, 1.f, 0.f);
+	glVertex3fv(glm::value_ptr(t0));
+	glVertex3fv(glm::value_ptr(t0 + n * 2.f));
+
+	n = glm::normalize(n);
+	up = glm::normalize(up);
+
+	/*
+	vec3 tangent = normalize(up - normal * dot(up, normal));
+   	vec3 bitangent = cross(normal, tangent);
+   	mat3 tbn = mat3(tangent, bitangent, normal);
+
+	*/
+
+	glLineWidth(1.f);
+
+	glm::mat3 r = glm::mat3(t, n, b);
+
+	const float muh = 0.5f / points.size();
+
+		for(int i = 0; i < points.size(); ++i)
+		{
+			glColor3f(i * muh, i * muh, i * muh);
+			glVertex3fv(glm::value_ptr(t0));
+			glVertex3fv(glm::value_ptr(t0 + r * points[i]));
+		};
+
+	glEnd();
+
+
+
+
+    //glUniform1i(u_frame, ++frame);
+    //glUniform1f(u_accum, static_cast<float>(frame) / static_cast<float>(frame + 1));
+
+    //glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+    //glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    //glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+    //glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    //glBlitFramebuffer(0, 0, viewport[0], viewport[1], 0, 0, viewport[0], viewport[1], GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
     glFlush();
+	glutSwapBuffers();
 }
 
 // moep
@@ -403,7 +489,7 @@ void pointsOnSphere(
     // iterative triangle refinement - split each triangle 
     // into 4 new ones and create points appropriately.
 
-    const int r = static_cast<int>(ceil(log(static_cast<float>(minN * 2 / 12.f)) / log(4.f))); // N = 12 * 4 ^ r
+    const int r = static_cast<int>(log(static_cast<float>(minN * 2 / 12.f)) / log(4.f) + .5f); // N = 12 * 4 ^ r
 
     std::hash_map<glm::highp_uint, glm::uint> cache;
 
@@ -440,40 +526,15 @@ void pointsOnSphere(
 
     // 3. shuffle all points of hemisphere
 
-    std::shuffle(points.begin(), points.end(), rng);
-}
+    std::random_device rd;
+    std::mt19937 engine(rd()); 
 
-void pointsInLight(
-	std::vector<glm::vec3> & lights
-,	const glm::vec3 & llf
-,	const glm::vec3 & urb
-,	const int minN)
-{
-	glm::vec3 min, max;
-
-	min = glm::min(llf, urb);
-	max = glm::max(llf, urb);
-
-	glm::vec3 size = max - min;
-
-	const int r = static_cast<int>(ceil(sqrtf(static_cast<float>(minN))));
-
-	glm::vec3 step(size / static_cast<float>(r - 1));
-
-	for(float x = min.x; x < max.x; x += step.x)
-		for(float z = min.z; z < max.z; z += step.z)
-			lights.push_back(glm::vec3(x, glm::linearRand(min.y, max.y), z));
-
-    // 2. shuffle all points
-
-    std::shuffle(lights.begin(), lights.end(), rng);
+    std::shuffle(points.begin(), points.end(), engine);
 }
 
 // initialization
 int main(int argc, char** argv)
 {
-	rng.seed(static_cast<unsigned long>(time(NULL)));
-
     // GLUT & GLEW
 
 	glutInit(&argc, argv);
@@ -482,7 +543,7 @@ int main(int argc, char** argv)
     //glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
     //glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
 
-	glutInitDisplayMode(GLUT_RGBA | GLUT_SINGLE);
+	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
     glutInitWindowSize(viewport[0], viewport[1]);
 
     glutCreateWindow("Minimal GLSL Path Tracer v1 - Daniel Limberger");
@@ -556,10 +617,10 @@ int main(int argc, char** argv)
 
 	std::vector<glm::vec3> vertices;
 	// lights
-	vertices.push_back(glm::vec3( 343.0, 548.8, 227.0)); // 00
-	vertices.push_back(glm::vec3( 343.0, 548.8, 332.0)); // 01
-	vertices.push_back(glm::vec3( 213.0, 548.8, 332.0)); // 02
-	vertices.push_back(glm::vec3( 213.0, 548.8, 227.0)); // 03
+	vertices.push_back(glm::vec3( 343.0, 548.7998, 227.0)); // 00
+	vertices.push_back(glm::vec3( 343.0, 548.7998, 332.0)); // 01
+	vertices.push_back(glm::vec3( 213.0, 548.7998, 332.0)); // 02
+	vertices.push_back(glm::vec3( 213.0, 548.7998, 227.0)); // 03
 	// room
 	vertices.push_back(glm::vec3(   0.0,   0.0,   0.0)); // 04 
 	vertices.push_back(glm::vec3(   0.0,   0.0, 559.2)); // 05 
@@ -592,15 +653,15 @@ int main(int argc, char** argv)
 	// light
 	indices.push_back(glm::uvec4(  0,  1,  2, 0));
 	indices.push_back(glm::uvec4(  0,  2,  3, 0));
-	// room ceiling
-	indices.push_back(glm::uvec4( 10, 11,  7, 1));
-	indices.push_back(glm::uvec4( 10,  7,  6, 1));
 	// room floor
 	indices.push_back(glm::uvec4(  8,  4,  5, 1));
 	indices.push_back(glm::uvec4(  8,  5,  9, 1));
-	// room front wall
-	indices.push_back(glm::uvec4( 10, 6,  4, 1));
-	indices.push_back(glm::uvec4( 10, 4,  8, 1));	
+	// room ceiling
+	indices.push_back(glm::uvec4( 10, 11,  7, 1));
+	indices.push_back(glm::uvec4( 10,  7,  6, 1));
+	//// room front wall
+	//indices.push_back(glm::uvec4(  4,  6, 10, 1));
+	//indices.push_back(glm::uvec4(  4, 10,  8, 1));
 	// room back wall
 	indices.push_back(glm::uvec4(  9,  5,  7, 1));
 	indices.push_back(glm::uvec4(  9,  7, 11, 1));
@@ -674,12 +735,12 @@ int main(int argc, char** argv)
 	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);  
 	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    // CREATE HEMISPHERE PATH SAMPLES
+    // CREATE HEMISPHERE SAMPLES
 
-    std::vector<glm::vec3> points;
-    pointsOnSphere(points, static_cast<unsigned int>(1e4));
+    //std::vector<glm::vec3> points;
+    pointsOnSphere(points, static_cast<unsigned int>(1e3));
 
-    GLsizei samplerSize = static_cast<GLsizei>(sqrt(points.size()));
+    const GLsizei samplerSize = static_cast<GLsizei>(sqrt(points.size()));
     while(points.size() > samplerSize * samplerSize)
         points.pop_back();
 
@@ -695,27 +756,18 @@ int main(int argc, char** argv)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);  
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    // CREATE LIGHT AREA SAMPLES
-
-    std::vector<glm::vec3> lights;
-    pointsInLight(lights, vertices[0], vertices[2], 1024);
-
-	glActiveTexture(GL_TEXTURE5);
-
-	glGenTextures(1, &lightsImage);
-	glBindTexture(GL_TEXTURE_2D, lightsImage);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 32, 32
-		, 0, GL_RGB, GL_FLOAT, &lights[0]);
-	glError();
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);  
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);  
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);  
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-    // START
-
     glActiveTexture(GL_TEXTURE0);
 
+	// 
+	
+	srand(time(NULL));
+	triangle[0] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+	triangle[1] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+	triangle[2] = glm::normalize(glm::vec3(1.f / rand(), 1.f / rand(), 1.f / rand())) * 2.f - 1.f;
+
+
+    // START
+	
 	glutMainLoop();
 
     return 0;

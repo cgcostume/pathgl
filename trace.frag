@@ -1,13 +1,17 @@
 #version 140
 
+precision highp float;
+
 out vec4 gl_FragColor;
 
 uniform int frame;
+uniform int rand;
 uniform float accum;
 uniform vec3 eye;
 uniform vec4 viewport;
 
 uniform  sampler2D hsphere;
+uniform  sampler2D lights;
 
 uniform  sampler1D vertices;
 uniform  sampler1D colors;
@@ -38,7 +42,8 @@ bool intersection(
 	vec3  h = cross(ray, e1);
 	float a = dot(e0, h);
 
-	if(a > -EPSILON && a < EPSILON)
+	// if(a > -EPSILON && a < EPSILON) // backface culling off
+	if(a < EPSILON) // backface culling on
 		return false;
 
 	float f = 1.0 / a;
@@ -113,7 +118,7 @@ float intersection(
 	 vec4 tc;
 	ivec4 ti;
 
-	for(int i = 2; i < 32; ++i)
+	for(int i = 2; i < 34; ++i)
 	{
 		ti = ivec4(texelFetch(indices, i, 0));
 
@@ -128,24 +133,39 @@ float intersection(
 			tm = t;
 		}
 	}
+
     return tm;
 }
 
 // intersection with scene geometry
-bool shadow(
-    const in vec3 origin
-,   const in vec3 ray)
+float shadow(
+	const in int fragID
+,	const in ivec2 lightssize
+,	const in vec3 origin
+,	const in vec3 n)
 {
+
     float tm = INFINITY;
-	float t;
+	float t = INFINITY;
 
 	 vec3 tv[3];
 	 vec4 tc;
 	ivec4 ti;
 
-	// check for intersections with light triangles
+	int i = int(mod(fragID, lightssize[0] * lightssize[1]));
 
-	for(int i = 0; i < 2; ++i)
+    int y = int(i / float(lightssize[0]));
+    int x = int(i - y * lightssize[0]);
+
+	// select random point on hemisphere
+	vec3 ray = normalize(texelFetch(lights, ivec2(x, y), 0).rgb - origin);
+
+	float a = dot(ray, n);
+
+	if(a < EPSILON)
+		return 0.0;
+
+	for(int i = 4; i < 34; ++i)
 	{
 		ti = ivec4(texelFetch(indices, i, 0));
 
@@ -154,26 +174,9 @@ bool shadow(
 		tv[2] = texelFetch(vertices, ti[2], 0).xyz;
 
 		if(intersection( tv, origin, ray, tm, t))
-		{
-			tm = t;
-			continue;
-		}
+			return 0.0;
 	}
-	if(tm >= INFINITY)
-		return false;
-
-	for(int i = 2; i < 32; ++i)
-	{
-		ti = ivec4(texelFetch(indices, i, 0));
-
-		tv[0] = texelFetch(vertices, ti[0], 0).xyz;
-		tv[1] = texelFetch(vertices, ti[1], 0).xyz;
-		tv[2] = texelFetch(vertices, ti[2], 0).xyz;
-
-		if(intersection( tv, origin, ray, tm, t))
-			return false;
-	}
-	return true;
+	return a * a * a;
 }
 
 vec3 normal(
@@ -193,8 +196,7 @@ vec3 normal(
 }
 
 vec3 random(
-	const in int offset
-,	const in int fragID
+	const in int fragID
 ,	const in ivec2 hspheresize)
 {
 	int i = int(mod(fragID, hspheresize[0] * hspheresize[1]));
@@ -237,13 +239,17 @@ void main()
 {
     vec3 origin = eye;
     vec3 ray = normalize(v_ray);
-	vec3 n, hit;
+	vec3 n;
 	mat3 tangentspace;
 
 	// fragment index for random variation
+	
 	ivec2 hspheresize = textureSize(hsphere, 0);
+	ivec2 lightssize = textureSize(lights, 0);
+
 	vec2 xy = v_uv * vec2(viewport[0], viewport[1]);
-	int fragID = int(xy.y * viewport[0] + xy.x + frame);
+	int fragID = int(xy.y * viewport[0] + xy.x + frame + rand);
+
 
 	// triangle data
     vec3 triangle[3];
@@ -256,22 +262,25 @@ void main()
 
 	float t = INFINITY;
 
-	for(int bounce = 0; bounce < 5; ++bounce)
+	for(int bounce = 0; bounce < 10; ++bounce)
 	{
   		t = intersection(origin, ray, triangle, index); // compute t from objects
 
-		hit = origin + ray * t;
+		// TODO: break on no intersection, with correct path color weight?
+		if(t == INFINITY)
+			break;
+
+		origin = origin + ray * t;
 		n = normal(triangle, tangentspace);
 
   		vec3 color = texelFetch(colors, index, 0).xyz; // compute material color from hit
-  		float lighting = 0.2; // compute direct lighting from hit
+  		float lighting = shadow(fragID + bounce, lightssize, origin, n) * 0.2; // compute direct lighting from hit
 
   		// accumulate incoming light
   		maskColor *= color;
   		pathColor += maskColor * lighting;
 
-  		ray = tangentspace * random(bounce, fragID, hspheresize); // compute next ray
-  		origin = hit;
+  		ray = tangentspace * random(fragID + bounce, hspheresize); // compute next ray
 	}
 
     /*
