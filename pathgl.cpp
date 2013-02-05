@@ -2,6 +2,12 @@
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 
+#ifdef WIN32
+#include <GL/wglew.h>
+#else
+#include <GL/glxew.h>
+#endif
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -32,18 +38,16 @@ GLuint traceprog(-1);
 GLuint framebuffer(-1);
 GLuint texture(-1);
 
-// millisecs per frame
-int fps(20);
-
 // frame counter for iterative accumulation
 int frame(-1);
 
 // camera - taken for cornell box
-glm::vec3 eye   (278.f, 273.f,-800.f);
-glm::vec3 center(eye + glm::vec3(0.f, 0.f, 1.f));
+glm::vec3 eye   (278.f, 273.f,-800.0f);
+glm::vec3 center(278.f, 273.f, 279.6f);
 glm::vec3 up(0.f, 1.f, 0.f);
 
-float fovy(140.0);
+float angle( 0.f);
+float fovy(143.f);
 
 GLint viewport[2] = { 520, 520 };
 
@@ -138,6 +142,25 @@ void clear()
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    const glm::vec2 viewportf(viewport[0], viewport[1]);
+
+    glm::vec3 c(center);
+//    e.x = (cos(angle) - sin(angle)) * (center.z - eye.z) + center.x;
+    //e.z = (sin(angle) + cos(angle)) * (center.z - eye.z) + center.z;
+    c.x += 50;
+
+    glm::vec3 e(eye);
+    e.x += 50;
+
+    const glm::mat4 projection(glm::perspective(fovy, viewportf.y / viewportf.x, 1.f, 2000.f));
+    const glm::mat4 view(glm::lookAt(e, c, up));
+
+    transform = projection * view * glm::mat4(1);
+    transform = glm::transpose(transform);
+
+    if(u_transform != -1)
+        glUniformMatrix4fv(u_transform, 1, GL_FALSE, glm::value_ptr(transform));   
 }
 
 // updates shader sources, and reinitializes uniforms
@@ -163,8 +186,6 @@ void update()
 
     const glm::vec2 viewportf(viewport[0], viewport[1]);
 
-    if(u_transform != -1)
-        glUniformMatrix4fv(u_transform, 1, GL_FALSE, glm::value_ptr(transform));
     if(u_eye != -1)
         glUniform3fv(u_eye, 1, glm::value_ptr(eye));
     if(u_viewport != -1)
@@ -212,13 +233,6 @@ void on_reshape(int w, int h)
     glViewport(0, 0, w, h);
     glError();
 
-    const glm::mat4 perspective(glm::perspective(fovy, viewportf.y / viewportf.x, 1.f, 2.f));
-    const glm::mat4 view(glm::lookAt(eye, center, up));
-    const glm::mat4 model(1);
-
-    transform = perspective * view * model;
-
-    glUniformMatrix4fv(u_transform, 1, GL_FALSE, glm::value_ptr(transform));
     glUniform4f(u_viewport, viewportf.x, viewportf.y, 1.f / viewportf.x, 1.f / viewportf.y);
 
     // resize fbo textures
@@ -237,7 +251,7 @@ void on_reshape(int w, int h)
     clear();
 }
 
-std::uniform_int_distribution<int> int_dist(0, 1e6);
+std::uniform_int_distribution<int> int_dist(0, static_cast<int>(1e6));
 
 // increments frame number, calcs accum factor, executes path tracing for viewport
 // by rendering the screen aligned rect into fbo with accumulation texture, while 
@@ -248,7 +262,7 @@ void on_display()
     glUniform1i(u_frame, ++frame);
 	glUniform1i(u_rand, int_dist(rng));
     glUniform1f(u_accum, static_cast<float>(frame) / static_cast<float>(frame + 1));
-
+    
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -256,7 +270,7 @@ void on_display()
     glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     glBlitFramebuffer(0, 0, viewport[0], viewport[1], 0, 0, viewport[0], viewport[1], GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-    glFlush();
+    glutSwapBuffers(); // FIX: causes memory leaks on single_buffering (GLUT_SINGLE) - glFlush too...
 }
 
 // moep
@@ -267,16 +281,6 @@ void on_keyboard(unsigned char key,	int x, int y)
     case 27: // ESC key
 		exit(0);
         break;
-
-	case 43: // + key
-		if(fps < 1000)
-			++fps;
-		break;
-
-	case 45: // - key
-		if(fps > 1)
-			--fps;
-		break;
 
     default:
 		break;
@@ -294,17 +298,19 @@ void on_special(int key, int x,	int y)
 	case GLUT_KEY_F6:
         clear();
 		break;
+    case GLUT_KEY_LEFT:
+        {
+            angle -= 1.f;
+            clear();
+        }
+		break;
 	default:
 		break;
     }
 }
 
-// posts redisplay each millisecond
-void on_timer(int value)
+void on_idle()
 {
-	const int ms(static_cast<int>(1000.0 / fps));
-
-    glutTimerFunc(ms, on_timer, ms);
 	glutPostRedisplay();
 }
 
@@ -460,8 +466,8 @@ void pointsInLight(
 
 	glm::vec3 step(size / static_cast<float>(r - 1));
 
-	for(float x = min.x; x < max.x; x += step.x)
-		for(float z = min.z; z < max.z; z += step.z)
+	for(float x = min.x; x <= max.x; x += step.x)
+		for(float z = min.z; z <= max.z; z += step.z)
 			lights.push_back(glm::vec3(x, glm::linearRand(min.y, max.y), z));
 
     // 2. shuffle all points
@@ -477,30 +483,37 @@ int main(int argc, char** argv)
     // GLUT & GLEW
 
 	glutInit(&argc, argv);
-    
+
     glutInitContextVersion(3, 1);
     //glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
     //glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
 
-	glutInitDisplayMode(GLUT_RGBA | GLUT_SINGLE);
+	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE);
     glutInitWindowSize(viewport[0], viewport[1]);
 
     glutCreateWindow("Minimal GLSL Path Tracer v1 - Daniel Limberger");
     glewInit();
 
+    // disable vsync
+#ifdef WIN32
+    wglSwapIntervalEXT(0);
+#else
+    glXSwapIntervalEXT(0);
+#endif
+    glError();
+
     glutDisplayFunc (on_display);
     glutReshapeFunc (on_reshape);
     glutKeyboardFunc(on_keyboard);
     glutSpecialFunc (on_special);
-
-    glutTimerFunc(1, on_timer, 1);
+    glutIdleFunc    (on_idle);
 
     // RECT
 
-    static const GLfloat vs[] = {+1.f,-1.f,+1.f,+1.f,-1.f,-1.f,-1.f,+1.f};
+    static const GLfloat vs[] = {+1.f,-1.f, 0.f,+1.f,+1.f, 0.f,-1.f,-1.f, 0.f,-1.f,+1.f, 0.f};
     glGenBuffers(1, &rect);
     glBindBuffer(GL_ARRAY_BUFFER, rect);
-    glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(GLfloat), vs, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 12 * sizeof(GLfloat), vs, GL_STATIC_DRAW);
     glError();
 
     // CREATE FBO
@@ -545,7 +558,7 @@ int main(int argc, char** argv)
     const int a_vertex = glGetAttribLocation(traceprog, "a_vertex");
 
     glBindBuffer(GL_ARRAY_BUFFER, rect);
-    glVertexAttribPointerARB(a_vertex, 2, GL_FLOAT, 0, 0, 0);
+    glVertexAttribPointerARB(a_vertex, 3, GL_FLOAT, 0, 0, 0);
     glEnableVertexAttribArrayARB(a_vertex);
     glError();
 
@@ -556,7 +569,7 @@ int main(int argc, char** argv)
 
 	std::vector<glm::vec3> vertices;
 	// lights
-	vertices.push_back(glm::vec3( 343.0, 548.8, 227.0)); // 00
+	vertices.push_back(glm::vec3( 343.0, 448.8, 227.0)); // 00
 	vertices.push_back(glm::vec3( 343.0, 548.8, 332.0)); // 01
 	vertices.push_back(glm::vec3( 213.0, 548.8, 332.0)); // 02
 	vertices.push_back(glm::vec3( 213.0, 548.8, 227.0)); // 03
@@ -698,7 +711,7 @@ int main(int argc, char** argv)
     // CREATE LIGHT AREA SAMPLES
 
     std::vector<glm::vec3> lights;
-    pointsInLight(lights, vertices[0], vertices[2], 1024);
+    pointsInLight(lights, vertices[0], vertices[2], 32 * 32);
 
 	glActiveTexture(GL_TEXTURE5);
 

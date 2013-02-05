@@ -176,9 +176,10 @@ float shadow(
 		if(intersection( tv, origin, ray, tm, t))
 			return 0.0;
 	}
-	return a * a * a;
+	return a;
 }
 
+// retrieve normal of triangle, and provide tangentspace
 vec3 normal(
 	const in vec3 triangle[3]
 ,	out mat3 tangentspace)
@@ -195,6 +196,7 @@ vec3 normal(
 	return tangentspace[1];
 }
 
+// select random point on hemisphere
 vec3 random(
 	const in int fragID
 ,	const in ivec2 hspheresize)
@@ -204,29 +206,8 @@ vec3 random(
     int y = int(i / float(hspheresize[0]));
     int x = int(i - y * hspheresize[0]);
 
-	// select random point on hemisphere
 	return texelFetch(hsphere, ivec2(x, y), 0).rgb;
 }
-
-/*vec4 shade(
-	const in vec3 po
-,	const in vec3 triangle[3]
-,	const in vec4 color
-,	const in vec3 ray
-,	out vec3 refl)
-{
-	vec3  n = normal(triangle);
-
-	// 1. absorb some color from 
-	// 2. get random direction on oriented disk
-	// 3. check for intersection with lights, and if, check for occluder
-	// 4. if occluder? get weighted diffuse	
-
-	//refl = reflect(rayd, n);
-	//float s = shadow(po, refl) ? 0.5 : 1.0;
-
-	return vec4(n * 0.5 + 0.5, 1.0);
-}*/
 
 // http://gpupathtracer.blogspot.de/
 // http://www.iquilezles.org/www/articles/simplepathtracing/simplepathtracing.htm
@@ -262,7 +243,7 @@ void main()
 
 	float t = INFINITY;
 
-	for(int bounce = 0; bounce < 10; ++bounce)
+	for(int bounce = 0; bounce < 4; ++bounce)
 	{
   		t = intersection(origin, ray, triangle, index); // compute t from objects
 
@@ -274,26 +255,15 @@ void main()
 		n = normal(triangle, tangentspace);
 
   		vec3 color = texelFetch(colors, index, 0).xyz; // compute material color from hit
-  		float lighting = shadow(fragID + bounce, lightssize, origin, n) * 0.2; // compute direct lighting from hit
+  		float lighting = shadow(fragID + bounce, lightssize, origin, n) * 0.4; // compute direct lighting from hit
 
   		// accumulate incoming light
+
   		maskColor *= color;
   		pathColor += maskColor * lighting;
 
   		ray = tangentspace * random(fragID + bounce, hspheresize); // compute next ray
 	}
-
-    /*
-    float t;
-	vec3 po = rayo;
-
-	t = intersection(rayo, rayd, triangle, color);
-
-	po += rayd * t;
-	color = shade(po, triangle, color, rayd, refl);
-    */
-    //gl_FragColor = texture(source, v_uv) + 0.001 * color; //v_uv.x, v_uv.y, 0.0, 1.0);
-    
+   
     gl_FragColor = vec4(mix(pathColor, texture(source, v_uv).rgb, accum), 1.0);
-    //gl_FragColor = vec4(vec3(accum * 0.5), 1.0);
 }
