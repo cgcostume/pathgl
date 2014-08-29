@@ -14,3 +14,4 @@ Missing in Action (todo):
 * Bounding Volume Hierarchies
 * ... more
 
+![accum](https://raw.githubusercontent.com/wiki/cgcostume/pathgl/pathgl_v1_accum.gif)
