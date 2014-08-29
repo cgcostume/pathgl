@@ -5,6 +5,8 @@ Path traceing test for triangle meshes, utilizing the GPU. In each frame, one pa
 
 Check out the dirty source code (its probably plattform independent - not tested yet) or try out the windows x64 demo: http://pathgl.googlecode.com/files/pathgl_v1_a2a36eb7c12c.7z
 
+![accum](https://raw.githubusercontent.com/wiki/cgcostume/pathgl/pathgl_v1_accum.gif)
+
 Missing in Action (todo):
 
 * Antialiasing
@@ -13,5 +15,3 @@ Missing in Action (todo):
 * Reflection
 * Bounding Volume Hierarchies
 * ... more
-
-![accum](https://raw.githubusercontent.com/wiki/cgcostume/pathgl/pathgl_v1_accum.gif)
